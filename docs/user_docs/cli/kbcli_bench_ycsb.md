@@ -5,16 +5,25 @@ title: kbcli bench ycsb
 Run YCSB benchmark on a cluster
 
 ```
-kbcli bench ycsb [BenchmarkName] [flags]
+kbcli bench ycsb [Step] [BenchmarkName] [flags]
 ```
 
 ### Examples
 
 ```
-  # ycsb on a cluster
+  # ycsb on a cluster,  that will exec for all steps, cleanup, prepare and run
   kbcli bench ycsb mytest --cluster mycluster --user xxx --password xxx --database mydb
   
-  # ycsb on a cluster with threads count
+  # ycsb on a cluster with cleanup, only cleanup by deleting the testdata
+  kbcli bench ycsb cleanup mytest --cluster mycluster --user xxx --password xxx --database mydb
+  
+  # ycsb on a cluster with prepare, just prepare by creating the testdata
+  kbcli bench ycsb prepare mytest --cluster mycluster --user xxx --password xxx --database mydb
+  
+  # ycsb on a cluster with run, just run by running the test
+  kbcli bench ycsb run mytest --cluster mycluster --user xxx --password xxx --database mydb
+  
+  # ycsb on a cluster with thread counts
   kbcli bench ycsb mytest --cluster mycluster --user xxx --password xxx --database mydb --threads 4,8
   
   # ycsb on a cluster with record number and operation number
@@ -30,6 +39,7 @@ kbcli bench ycsb [BenchmarkName] [flags]
       --cluster string                     the cluster of database
       --database string                    database name
       --driver string                      the driver of database
+      --extra-args strings                 extra arguments for benchmark
   -h, --help                               help for ycsb
       --host string                        the host of database
       --insert-proportion int              the percentage of insert operations in benchmark
@@ -41,6 +51,7 @@ kbcli bench ycsb [BenchmarkName] [flags]
       --record-count int                   the number of records to use (default 1000)
       --scan-proportion int                the percentage of scan operations in benchmark
       --threads ints                       the number of threads to use (default [1])
+      --tolerations strings                Tolerations for benchmark, such as '"dev=true:NoSchedule,large=true:NoSchedule"'
       --update-proportion int              the percentage of update operations in benchmark
       --user string                        the user of database
 ```

@@ -138,19 +138,9 @@ func (mgr *Manager) IsDBStartupReady() bool {
 		return true
 	}
 
-	cmd := exec.Command("pg_isready")
-	if config.username != "" {
-		cmd.Args = append(cmd.Args, "-U", config.username)
-	}
-	if config.host != "" {
-		cmd.Args = append(cmd.Args, "-h", config.host)
-	}
-	if config.port != 0 {
-		cmd.Args = append(cmd.Args, "-p", strconv.FormatUint(uint64(config.port), 10))
-	}
-	err := cmd.Run()
+	err := mgr.Pool.Ping(context.TODO())
 	if err != nil {
-		mgr.Logger.Infof("DB is not ready: %v", err)
+		mgr.Logger.Warnf("DB is not ready, ping failed, err:%v", err)
 		return false
 	}
 
@@ -736,18 +726,10 @@ func (mgr *Manager) follow(needRestart bool, cluster *dcs.Cluster) error {
 	}
 
 	if !needRestart {
-		var stdout, stderr bytes.Buffer
-		cmd := exec.Command("su", "-c", "pg_ctl reload", "postgres")
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		err = cmd.Run()
-		if err != nil || stderr.String() != "" {
-			mgr.Logger.Errorf("postgresql reload failed, err:%v, stderr:%s", err, stderr.String())
+		if err = mgr.pgReload(context.TODO()); err != nil {
+			mgr.Logger.Errorf("reload conf failed, err:%v", err)
 			return err
 		}
-
-		mgr.Logger.Infof("successfully follow new leader:%s", leaderMember.Name)
 		return nil
 	}
 
@@ -858,9 +840,45 @@ func (mgr *Manager) CreateRoot(ctx context.Context) error {
 }
 
 func (mgr *Manager) Lock(ctx context.Context, reason string) error {
+	sql := "alter system set default_transaction_read_only=on;"
+
+	_, err := mgr.Exec(ctx, sql)
+	if err != nil {
+		mgr.Logger.Errorf("exec sql:%s failed, err:%v", sql, err)
+		return err
+	}
+
+	if err = mgr.pgReload(ctx); err != nil {
+		mgr.Logger.Errorf("reload conf failed, err:%v", err)
+		return err
+	}
+
+	mgr.Logger.Infof("Lock db success: %s", reason)
 	return nil
 }
 
 func (mgr *Manager) Unlock(ctx context.Context) error {
+	sql := "alter system set default_transaction_read_only=off;"
+
+	_, err := mgr.Exec(ctx, sql)
+	if err != nil {
+		mgr.Logger.Errorf("exec sql:%s failed, err:%v", sql, err)
+		return err
+	}
+
+	if err = mgr.pgReload(ctx); err != nil {
+		mgr.Logger.Errorf("reload conf failed, err:%v", err)
+		return err
+	}
+
+	mgr.Logger.Infof("UnLock db success")
 	return nil
+}
+
+func (mgr *Manager) pgReload(ctx context.Context) error {
+	reload := "select pg_reload_conf();"
+
+	_, err := mgr.Exec(ctx, reload)
+
+	return err
 }

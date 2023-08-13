@@ -21,12 +21,13 @@ package bench
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/docker/cli/cli"
 	"github.com/spf13/cobra"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -39,6 +40,7 @@ import (
 	utilcomp "k8s.io/kubectl/pkg/util/completion"
 	"k8s.io/kubectl/pkg/util/templates"
 
+	"github.com/apecloud/kubeblocks/internal/cli/cluster"
 	"github.com/apecloud/kubeblocks/internal/cli/list"
 	"github.com/apecloud/kubeblocks/internal/cli/printer"
 	"github.com/apecloud/kubeblocks/internal/cli/types"
@@ -62,9 +64,11 @@ var benchGVRList = []schema.GroupVersionResource{
 	types.SysbenchGVR(),
 	types.YcsbGVR(),
 	types.TpccGVR(),
+	types.TpchGVR(),
 }
 
 type BenchBaseOptions struct {
+	// define the target database
 	Driver      string
 	Database    string
 	Host        string
@@ -72,6 +76,36 @@ type BenchBaseOptions struct {
 	User        string
 	Password    string
 	ClusterName string
+
+	// define the config of pod that run benchmark
+	name           string
+	namespace      string
+	Step           string // specify the benchmark step, exec all, cleanup, prepare or run
+	TolerationsRaw []string
+	Tolerations    []corev1.Toleration
+	ExtraArgs      []string // extra arguments for benchmark
+
+	factory cmdutil.Factory
+	client  clientset.Interface
+	dynamic dynamic.Interface
+	*cluster.ClusterObjects
+	genericclioptions.IOStreams
+}
+
+func (o *BenchBaseOptions) BaseComplete() error {
+	tolerations, err := util.BuildTolerations(o.TolerationsRaw)
+	if err != nil {
+		return err
+	}
+	tolerationsJSON, err := json.Marshal(tolerations)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(tolerationsJSON, &o.Tolerations); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // BaseValidate validates the base options
@@ -102,6 +136,10 @@ func (o *BenchBaseOptions) AddFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&o.Password, "password", "", "the password of database")
 	cmd.Flags().IntVar(&o.Port, "port", 0, "the port of database")
 	cmd.Flags().StringVar(&o.ClusterName, "cluster", "", "the cluster of database")
+	cmd.Flags().StringSliceVar(&o.TolerationsRaw, "tolerations", nil, `Tolerations for benchmark, such as '"dev=true:NoSchedule,large=true:NoSchedule"'`)
+	cmd.Flags().StringSliceVar(&o.ExtraArgs, "extra-args", nil, "extra arguments for benchmark")
+
+	registerClusterCompletionFunc(cmd, o.factory)
 }
 
 // NewBenchCmd creates the bench command
@@ -117,6 +155,7 @@ func NewBenchCmd(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.
 		NewPgBenchCmd(f, streams),
 		NewYcsbCmd(f, streams),
 		NewTpccCmd(f, streams),
+		NewTpchCmd(f, streams),
 		newListCmd(f, streams),
 		newDeleteCmd(f, streams),
 	)
@@ -150,7 +189,7 @@ func newListCmd(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.C
 		Use:     "list",
 		Short:   "List all benchmarks.",
 		Aliases: []string{"ls"},
-		Args:    cli.NoArgs,
+		Args:    cobra.NoArgs,
 		Example: benchListExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			cmdutil.CheckErr(o.run())
@@ -334,4 +373,28 @@ func validateBenchmarkExist(factory cmdutil.Factory, streams genericclioptions.I
 		}
 	}
 	return nil
+}
+
+// parseStepAndName parses the step and name from the given arguments and name prefix.
+// If no arguments are provided, it sets the step to "all" and generates a random name with the given prefix.
+// If the first argument is "all", "cleanup", "prepare", or "run", it sets the step to the argument value.
+// If a second argument is provided, it sets the name to the argument value.
+// If the first argument is not a valid step value, it sets the name to the first argument value.
+// Returns the step and name as strings.
+func parseStepAndName(args []string, namePrefix string) (step, name string) {
+	step = "all"
+	name = fmt.Sprintf("%s-%s", namePrefix, util.RandRFC1123String(6))
+
+	if len(args) > 0 {
+		switch args[0] {
+		case "all", "cleanup", "prepare", "run":
+			step = args[0]
+			if len(args) > 1 {
+				name = args[1]
+			}
+		default:
+			name = args[0]
+		}
+	}
+	return
 }

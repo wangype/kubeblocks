@@ -35,6 +35,7 @@ const (
 	stateNebula       = "nebula"
 	statePulsarBroker = "pulsar-broker"
 	statePulsarProxy  = "pulsar-proxy"
+	stateFoxLake      = "foxlake"
 	stateMariadb      = "mariadb"
 )
 
@@ -92,6 +93,8 @@ func New(typeName string) (ClusterCommands, error) {
 		return newPulsar("broker"), nil
 	case statePulsarProxy:
 		return newPulsar("proxy"), nil
+	case stateFoxLake:
+		return newFoxLake(), nil
 	case stateMariadb:
 		return newMariadb(), nil
 	default:
